@@ -25,6 +25,8 @@ cifar10_flow_matching/
 ├── models/unet.py
 ├── data/cifar10.py
 ├── pyproject.toml
+├── prepare_data.py
+├── scripts/full_pipeline.sh
 ├── train.py
 └── sample.py
 ```
@@ -46,13 +48,102 @@ uv run python -c "import torch; print(torch.__version__, torch.version.cuda)"
 
 输出应包含类似 `+cu128` 和 `12.8`。
 
+## 一键完整流程
+
+从环境同步、数据准备、训练到采样，可以直接用：
+
+```bash
+scripts/full_pipeline.sh \
+  --mode conditional \
+  --epochs 100 \
+  --batch-size 128 \
+  --steps 50
+```
+
+跑无条件版本：
+
+```bash
+scripts/full_pipeline.sh \
+  --mode unconditional \
+  --epochs 100 \
+  --batch-size 128 \
+  --steps 50
+```
+
+连续跑条件和无条件两套实验：
+
+```bash
+scripts/full_pipeline.sh \
+  --mode both \
+  --epochs 100 \
+  --data-dir /data/cifar10_flow_matching/datasets \
+  --run-root /data/cifar10_flow_matching/runs
+```
+
+脚本会生成配置到 `configs/generated/`，输出到 `runs/full_pipeline/`，并检查当前 PyTorch 是否为 CUDA 12.x build。查看所有参数：
+
+```bash
+scripts/full_pipeline.sh --help
+```
+
+## 准备数据集
+
+默认配置里的数据路径是：
+
+```yaml
+data_dir: ./datasets
+```
+
+先在服务器上下载并校验 CIFAR-10：
+
+```bash
+uv run python prepare_data.py --config configs/cifar10_unet_fm.yaml
+```
+
+成功后目录大致是：
+
+```text
+datasets/
+├── cifar-10-python.tar.gz
+└── cifar-10-batches-py/
+```
+
+如果服务器不能联网，可以在本地或另一台机器下载 CIFAR-10 Python 版本，然后把下面任意一种内容拷到服务器的 `datasets/`：
+
+```text
+cifar-10-python.tar.gz
+cifar-10-batches-py/
+```
+
+拷贝后用离线模式校验：
+
+```bash
+uv run python prepare_data.py \
+  --config configs/cifar10_unet_fm.yaml \
+  --no-download
+```
+
+如果想把数据放到更大的磁盘，例如 `/data/cifar10_flow_matching/datasets`，有两种方式：
+
+```bash
+uv run python prepare_data.py \
+  --config configs/cifar10_unet_fm.yaml \
+  --data-dir /data/cifar10_flow_matching/datasets
+```
+
+并同步修改 `configs/cifar10_unet_fm.yaml`：
+
+```yaml
+data_dir: /data/cifar10_flow_matching/datasets
+```
+
 ## 训练
 
 ```bash
 uv run python train.py --config configs/cifar10_unet_fm.yaml
 ```
 
-CIFAR-10 会自动下载到 `datasets/`。checkpoint 和采样图会保存到：
+训练脚本也会在缺数据时自动下载 CIFAR-10，但正式服务器训练建议先单独运行 `prepare_data.py`，这样数据问题会在训练开始前暴露。checkpoint 和采样图会保存到：
 
 ```text
 runs/cifar10_fm/
