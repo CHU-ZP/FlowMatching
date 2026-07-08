@@ -95,6 +95,12 @@ runs/cifar10_fm/
 └── samples/
 ```
 
+训练过程中保存的预览图片会写到：
+
+```text
+runs/cifar10_fm/samples/
+```
+
 中断后恢复：
 
 ```bash
@@ -243,6 +249,14 @@ scripts/full_pipeline.sh \
 
 ```bash
 scripts/full_pipeline.sh --help
+```
+
+完整流程脚本会把生成结果写到：
+
+```text
+runs/full_pipeline/
+├── conditional/samples/
+└── unconditional/samples/
 ```
 
 ## 7. CIFAR-10 类别

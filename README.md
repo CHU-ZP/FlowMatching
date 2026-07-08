@@ -70,6 +70,8 @@ That makes the supervised target unusually simple:
 u_t = x - z.
 ```
 
+This path construction is implemented in [`flow/paths.py`](flow/paths.py).
+
 ## The Training Objective
 
 During training, the code samples a real CIFAR-10 image, a Gaussian noise image, and a random time:
@@ -115,6 +117,8 @@ x - z
 
 In other words, the model learns the average direction that points at a given location and time should move.
 
+The loss wrapper lives in [`flow/losses.py`](flow/losses.py), and the training loop calls it from [`train.py`](train.py).
+
 ## Matching a Flow
 
 The word "flow" refers to the motion of an entire probability distribution over time. Let $p_t(x)$ be the distribution of samples at time $t$, with:
@@ -154,6 +158,8 @@ t: 0 \rightarrow 1.
 ```
 
 In this repository, sampling can use Euler or Heun integration. More steps usually give smoother trajectories, while fewer steps make generation faster.
+
+The ODE integrator is implemented in [`flow/sampler.py`](flow/sampler.py), with the sampling CLI in [`sample.py`](sample.py).
 
 ## Relation to Diffusion
 
@@ -203,6 +209,8 @@ v_\theta(x_t, t, y).
 
 For conditional generation, the class embedding is added to the time embedding before it is passed through the UNet blocks. Sampling can then request a specific class, cycle through classes, or render a full class grid.
 
+The UNet and class-conditioning logic live in [`models/unet.py`](models/unet.py).
+
 The training loss used by the code is the same Flow Matching objective:
 
 ```math
@@ -219,20 +227,6 @@ v_\theta(x_t,t,y) - (x - z)
 For unconditional training, the label term is simply absent.
 
 ## Results
-
-Training periodically writes sample grids to:
-
-```text
-runs/cifar10_fm/samples/
-```
-
-The full pipeline script writes generated outputs to:
-
-```text
-runs/full_pipeline/
-|-- conditional/samples/
-`-- unconditional/samples/
-```
 
 Below are representative outputs from a CIFAR-10 class-conditional run.
 
