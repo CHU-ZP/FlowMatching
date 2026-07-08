@@ -240,33 +240,13 @@ Below are representative outputs from a CIFAR-10 class-conditional run.
 
 Each row corresponds to one CIFAR-10 class. The class name is shown once on the left.
 
-![Class-conditional CIFAR-10 samples](assets/results/class_grid_euler_050.png)
+<img src="assets/results/class_grid_euler_050.png" alt="Class-conditional CIFAR-10 samples" width="520">
 
 ### Training Sample at Epoch 100
 
 A sampling grid saved during training.
 
-![CIFAR-10 samples at epoch 100](assets/results/epoch_0100.png)
-
-Common result files:
-
-| Result | Description | Default file |
-| --- | --- | --- |
-| class grid | one CIFAR-10 class per row | `class_grid_euler_050.png` |
-| class cycle | labels cycle through CIFAR-10 classes | `class_cycle_euler_050.png` |
-| single class | samples for one requested class, such as cat | `class_3_euler_050.png` |
-| unconditional | unconditional generation result | `samples_euler_050.png` |
-| trajectory | ODE trajectory from noise to image | `*.gif` |
-
-## Running the Project
-
-This README is meant to explain what the demo is showing. The operational guide lives in [Documentation](Documentation/README.md), including:
-
-- uv environment setup
-- CUDA 12.x installation notes
-- Hugging Face dataset preparation
-- full training commands
-- unconditional and class-conditional sampling commands
+<img src="assets/results/epoch_0100.png" alt="CIFAR-10 samples at epoch 100" width="520">
 
 ## Takeaway
 
