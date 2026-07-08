@@ -1,144 +1,94 @@
 # CIFAR-10 Flow Matching Demo
 
-这个项目展示一个最小、直观的 **CIFAR-10 pixel-space Flow Matching / Rectified Flow**：
+This repository is a compact demonstration of **pixel-space Flow Matching / Rectified Flow** on CIFAR-10.
 
 ```text
-Gaussian noise z + optional class label y -> ODE flow -> CIFAR-10 image x
+Gaussian noise z (+ optional class label y) -> learned ODE flow -> CIFAR-10 image x
 ```
 
-Flow Matching 可以理解为：
+Flow Matching can be read as one simple idea:
 
-> 不是学习“如何一步步加噪再反向去噪”，而是直接学习一个连续时间速度场，把简单分布搬运到数据分布。
+> Learn a continuous-time velocity field that transports a simple noise distribution into the data distribution.
 
-也就是从：
+In this project, the simple distribution is a standard Gaussian, the data distribution is CIFAR-10, and the velocity field is represented by a small UNet.
 
-$$
-z \sim p_0(z)
-$$
+The practical instructions are kept separate from the conceptual overview. For environment setup, dataset preparation, training, and sampling commands, see [Documentation](Documentation/README.md).
 
-通常是标准高斯：
+## The Idea
 
-$$
-p_0 = \mathcal{N}(0,I)
-$$
+Diffusion models are often introduced through a noising process and a learned reverse process. Flow Matching takes a more direct view: start from noise, define a path toward data, and train a network to predict the velocity along that path.
 
-通过一个 ODE 流：
+The model defines an ODE:
 
 $$
-\frac{dx_t}{dt} = v_\theta(x_t,t)
+\frac{d x_t}{d t} = v_\theta(x_t, t).
 $$
 
-把它变成真实数据分布：
+If the learned velocity field is good, integrating this ODE from a noise sample produces an image:
 
 $$
-x_1 \sim p_{\text{data}}(x)
+x_0 \sim \mathcal{N}(0, I),
+\qquad
+x_1 \approx \text{generated sample}.
 $$
 
-具体运行、环境、数据准备、训练和采样方法放在 [Documentation](Documentation/README.md)。
+So sampling is not framed as repeatedly denoising an image. It is framed as moving a point through a learned vector field.
 
-## 1. Flow Matching 的核心对象
+## A Straight Path From Noise to Images
 
-Diffusion 里模型常学的是：
-
-$$
-\epsilon_\theta(x_t,t)
-$$
-
-或者：
+The cleanest version pairs a noise sample with a real image:
 
 $$
-x_{0,\theta}(x_t,t)
+z \sim \mathcal{N}(0, I),
+\qquad
+x \sim p_{\mathrm{data}}(x).
 $$
 
-或者：
+Then it draws a straight line between them:
 
 $$
-v_\theta(x_t,t)
+x_t = (1 - t)z + tx.
 $$
 
-而 Flow Matching 里，模型直接学的是一个**速度场**：
+At the endpoints:
 
 $$
-v_\theta(x_t,t)
+x_{t=0} = z,
+\qquad
+x_{t=1} = x.
 $$
 
-它回答的问题是：
-
-> 当前点在时间 $t$ 位于 $x_t$，它应该往哪个方向移动，才能最终变成数据样本？
-
-所以 sampling 时不是反复去噪，而是解一个 ODE：
+Taking the derivative with respect to time gives the velocity along this path:
 
 $$
-x_0 \sim \mathcal{N}(0,I)
+\frac{d x_t}{d t} = x - z.
 $$
 
-$$
-\frac{dx_t}{dt}=v_\theta(x_t,t)
-$$
+That makes the supervised target unusually simple:
 
 $$
-x_1 \approx \text{generated sample}
+u_t = x - z.
 $$
 
-## 2. 最简单的 Flow Matching：线性插值路径
+## The Training Objective
 
-取一个噪声样本：
-
-$$
-z \sim \mathcal{N}(0,I)
-$$
-
-取一个真实数据样本：
+During training, the code samples a real CIFAR-10 image, a Gaussian noise image, and a random time:
 
 $$
-x \sim p_{\text{data}}(x)
+x \sim p_{\mathrm{data}},
+\qquad
+z \sim \mathcal{N}(0, I),
+\qquad
+t \sim U(0, 1).
 $$
 
-构造从噪声到数据的路径：
+It constructs the interpolated point:
 
 $$
-x_t = (1-t)z + tx
+x_t = (1 - t)z + tx,
 $$
 
-当：
-
-$$
-t=0
-$$
-
-有：
-
-$$
-x_0=z
-$$
-
-当：
-
-$$
-t=1
-$$
-
-有：
-
-$$
-x_1=x
-$$
-
-这是一条从噪声点走到真实样本点的直线路径。
-
-对时间求导：
-
-$$
-\frac{dx_t}{dt}=x-z
-$$
-
-所以目标速度就是：
-
-$$
-u_t = x-z
-$$
-
-训练目标变成：
+and trains the network to predict the velocity from noise to data:
 
 $$
 \mathcal{L}_{FM}
@@ -146,283 +96,114 @@ $$
 \mathbb{E}_{x,z,t}
 \left[
 \left\|
-v_\theta(x_t,t) - (x-z)
+v_\theta(x_t, t) - (x - z)
 \right\|^2
-\right]
+\right].
 $$
 
-这就是最直观版本的 Flow Matching。
-
-## 3. 它和 Diffusion 的区别
-
-Diffusion 的思路是：
+The network does not receive the original pair $(x, z)$, only the current point $x_t$ and the time $t$. Under MSE training, the optimal prediction is therefore:
 
 $$
-x_0 \rightarrow x_t \rightarrow x_T
+v^*(x_t, t)
+=
+\mathbb{E}
+\left[
+x - z
+\mid x_t, t
+\right].
 $$
 
-先定义一个加噪过程：
+In other words, the model learns the average direction that points at a given location and time should move.
+
+## Matching a Flow
+
+The word "flow" refers to the motion of an entire probability distribution over time. Let $p_t(x)$ be the distribution of samples at time $t$, with:
 
 $$
-q(x_t \mid x_0)
+p_0(x) = \mathcal{N}(0, I),
+\qquad
+p_1(x) = p_{\mathrm{data}}(x).
 $$
 
-然后学习反向过程：
-
-$$
-p_\theta(x_{t-1} \mid x_t)
-$$
-
-或者连续时间下学习 score / noise / velocity。
-
-Flow Matching 的思路是：
-
-$$
-z \rightarrow x
-$$
-
-直接定义一条从噪声分布到数据分布的路径，然后学习路径上的速度场。
-
-| 方法 | 学习对象 | 生成方式 |
-| --- | --- | --- |
-| VAE | latent posterior / decoder | sample latent 后 decoder |
-| Diffusion | denoising / score / noise | 反向去噪或 reverse SDE/ODE |
-| Flow Matching | vector field / velocity field | 解 ODE 从噪声流到数据 |
-
-Flow Matching 更像是在学：
-
-> 如何把整个噪声分布连续地推送成数据分布。
-
-## 4. 为什么叫 Flow Matching？
-
-因为它要匹配一个概率流。
-
-假设每个时间都有一个分布：
-
-$$
-p_t(x)
-$$
-
-其中：
-
-$$
-p_0(x)=\mathcal{N}(0,I)
-$$
-
-$$
-p_1(x)=p_{\text{data}}(x)
-$$
-
-如果有一个速度场：
-
-$$
-v_t(x)
-$$
-
-那么分布会按照这个速度场流动。
-
-这个过程满足连续性方程：
+A velocity field $v_t(x)$ moves this density according to the continuity equation:
 
 $$
 \frac{\partial p_t(x)}{\partial t}
 +
-\nabla \cdot
-\left(
-p_t(x)v_t(x)
-\right)
-=0
-$$
-
-这个式子表达的是：
-
-> 概率质量不会凭空出现或消失，只是在速度场推动下移动。
-
-Flow Matching 的目标就是学习一个神经网络速度场：
-
-$$
-v_\theta(x,t)
-$$
-
-让它匹配真实的概率流速度：
-
-$$
-v_t(x)
-$$
-
-## 5. 一个关键问题：速度目标不是随机的吗？
-
-训练时我们采样：
-
-$$
-z \sim \mathcal{N}(0,I)
-$$
-
-$$
-x \sim p_{\text{data}}(x)
-$$
-
-$$
-t \sim U(0,1)
-$$
-
-然后构造：
-
-$$
-x_t=(1-t)z+tx
-$$
-
-目标速度是：
-
-$$
-x-z
-$$
-
-这当然和采样的 $(x,z)$ 有关，看起来也是随机的。
-
-但这和 diffusion 里预测噪声很类似。模型看到的是：
-
-$$
-x_t,t
-$$
-
-它并不知道原始的 $(x,z)$。在 MSE 训练下，最优预测会变成条件期望：
-
-$$
-v^*(x_t,t)
+\nabla \cdot \left(p_t(x)v_t(x)\right)
 =
-\mathbb{E}
-\left[
-x-z
-\mid x_t,t
-\right]
+0.
 $$
 
-也就是说，模型不是要记住某一次随机采样的速度，而是学习：
+This says that probability mass is not created or destroyed. It is transported by the velocity field. Flow Matching trains $v_\theta(x,t)$ to match that transport field.
 
-> 在当前位置 $x_t$ 和时间 $t$ 下，平均来说应该往哪里流动。
+## Sampling With the Learned Field
 
-这点非常重要。
-
-## 6. Flow Matching 和 velocity prediction 的关系
-
-Diffusion 里的 velocity 通常来自加噪公式：
+After training, generation starts from Gaussian noise:
 
 $$
-x_t = \alpha_t x_0 + \sigma_t \epsilon
+x_0 \sim \mathcal{N}(0, I).
 $$
 
-对应的 velocity target 常写成某种组合：
+The sampler integrates:
 
 $$
-v = \alpha_t \epsilon - \sigma_t x_0
+\frac{d x_t}{d t} = v_\theta(x_t, t),
+\qquad
+t: 0 \rightarrow 1.
 $$
 
-它本质上还是服务于 diffusion 的噪声路径。
+In this repository, sampling can use Euler or Heun integration. More steps usually give smoother trajectories, while fewer steps make generation faster.
 
-而 Flow Matching 里的 velocity 更直接：
+## Relation to Diffusion
 
-$$
-x_t = (1-t)z + tx
-$$
+Diffusion models usually define a noising path such as:
 
 $$
-v = x-z
+x_t = \alpha_t x_0 + \sigma_t \epsilon,
 $$
 
-它就是路径的时间导数。
+and train a model to predict noise, score, data, or a velocity-style parameterization derived from that noising process.
 
-所以可以粗略理解为：
-
-> Diffusion 的 velocity prediction 是在 diffusion 框架内部重新参数化预测目标；Flow Matching 是直接把 velocity field 当成核心建模对象。
-
-## 7. Rectified Flow 是最容易理解的特殊情况
-
-Rectified Flow 常用的形式就是：
+Flow Matching uses velocity more literally. For the straight path:
 
 $$
-x_t = (1-t)x_0 + tx_1
+x_t = (1 - t)z + tx,
+\qquad
+v = x - z.
 $$
 
-其中：
+The velocity is the derivative of the path itself.
+
+| Method | Learned object | Generation |
+| --- | --- | --- |
+| VAE | latent distribution and decoder | sample latent, then decode |
+| Diffusion | denoising, score, or noise field | reverse denoising or reverse SDE/ODE |
+| Flow Matching | vector field / velocity field | solve an ODE from noise to data |
+
+## Inside This Demo
+
+The project trains a small UNet on normalized CIFAR-10 images:
 
 $$
-x_0 \sim \mathcal{N}(0,I)
+x \in \mathbb{R}^{3 \times 32 \times 32}.
 $$
 
-$$
-x_1 \sim p_{\text{data}}
-$$
-
-目标速度：
+The unconditional model learns:
 
 $$
-\dot{x}_t = x_1 - x_0
+v_\theta(x_t, t).
 $$
 
-训练：
+The class-conditional model also receives a CIFAR-10 label $y$:
 
 $$
-\mathbb{E}
-\left[
-\left\|
-v_\theta(x_t,t)
--
-(x_1-x_0)
-\right\|^2
-\right]
+v_\theta(x_t, t, y).
 $$
 
-采样：
+For conditional generation, the class embedding is added to the time embedding before it is passed through the UNet blocks. Sampling can then request a specific class, cycle through classes, or render a full class grid.
 
-$$
-x_0 \sim \mathcal{N}(0,I)
-$$
-
-然后解：
-
-$$
-\frac{dx_t}{dt}
-=
-v_\theta(x_t,t)
-$$
-
-从 $t=0$ 积分到 $t=1$。
-
-这就是最基础的 Flow Matching / Rectified Flow 直觉。
-
-## 8. 本项目对应的实现
-
-这个 demo 使用 CIFAR-10 图片作为数据样本：
-
-$$
-x \in \mathbb{R}^{3 \times 32 \times 32}
-$$
-
-噪声来自：
-
-$$
-z \sim \mathcal{N}(0,I)
-$$
-
-路径是：
-
-$$
-x_t = (1-t)z + tx
-$$
-
-网络是一个 small UNet。无条件版本学习：
-
-$$
-v_\theta(x_t,t)
-$$
-
-有条件版本额外输入 CIFAR-10 类别 $y$，学习：
-
-$$
-v_\theta(x_t,t,y)
-$$
-
-训练目标是：
+The training loss used by the code is the same Flow Matching objective:
 
 $$
 \mathcal{L}
@@ -430,87 +211,71 @@ $$
 \mathbb{E}_{x,z,t}
 \left[
 \left\|
-v_\theta(x_t,t,y)-(x-z)
+v_\theta(x_t,t,y) - (x - z)
 \right\|^2
-\right]
+\right].
 $$
 
-采样时从纯噪声开始，使用 Euler 或 Heun 方法积分：
+For unconditional training, the label term is simply absent.
 
-$$
-z \sim \mathcal{N}(0,I)
-$$
+## Results
 
-$$
-\frac{dx_t}{dt}=v_\theta(x_t,t,y)
-$$
-
-$$
-x_1 = \text{generated sample}
-$$
-
-## 9. 结果展示
-
-训练脚本会定期把采样结果保存到：
+Training periodically writes sample grids to:
 
 ```text
 runs/cifar10_fm/samples/
 ```
 
-一键脚本会把结果保存到：
+The full pipeline script writes generated outputs to:
 
 ```text
 runs/full_pipeline/
-├── conditional/samples/
-└── unconditional/samples/
+|-- conditional/samples/
+`-- unconditional/samples/
 ```
 
-下面是一次 CIFAR-10 class-conditional 训练后的示例结果。
+Below are representative outputs from a CIFAR-10 class-conditional run.
 
-**Class-Conditional Grid**
+### Class-Conditional Grid
 
-每一行对应一个 CIFAR-10 类别，左侧是类别名。
+Each row corresponds to one CIFAR-10 class. The class name is shown once on the left.
 
 ![Class-conditional CIFAR-10 samples](assets/results/class_grid_euler_050.png)
 
-**Training Sample at Epoch 100**
+### Training Sample at Epoch 100
 
-训练过程中定期保存的采样网格。
+A sampling grid saved during training.
 
 ![CIFAR-10 samples at epoch 100](assets/results/epoch_0100.png)
 
-常见结果文件：
+Common result files:
 
-| 结果 | 说明 | 默认文件 |
+| Result | Description | Default file |
 | --- | --- | --- |
-| class grid | 每行一个 CIFAR-10 类别，左侧写类别名 | `class_grid_euler_050.png` |
-| class cycle | 类别循环采样，用于快速看条件控制是否生效 | `class_cycle_euler_050.png` |
-| single class | 指定单个类别，例如 `cat` | `class_3_euler_050.png` |
-| unconditional | 无条件版本的生成结果 | `samples_euler_050.png` |
-| trajectory | 从噪声到图像的 ODE 生成过程 | `*.gif` |
+| class grid | one CIFAR-10 class per row | `class_grid_euler_050.png` |
+| class cycle | labels cycle through CIFAR-10 classes | `class_cycle_euler_050.png` |
+| single class | samples for one requested class, such as cat | `class_3_euler_050.png` |
+| unconditional | unconditional generation result | `samples_euler_050.png` |
+| trajectory | ODE trajectory from noise to image | `*.gif` |
 
-## 10. 一句话总结
+## Running the Project
 
-VAE 是：
+This README is meant to explain what the demo is showing. The operational guide lives in [Documentation](Documentation/README.md), including:
 
-> 学一个 latent distribution，再 decode。
+- uv environment setup
+- CUDA 12.x installation notes
+- Hugging Face dataset preparation
+- full training commands
+- unconditional and class-conditional sampling commands
 
-Diffusion 是：
+## Takeaway
 
-> 学一个反向去噪过程，把噪声逐步还原成数据。
-
-Flow Matching 是：
-
-> 学一个连续速度场，把噪声分布直接流动成数据分布。
-
-最核心公式可以记成：
+The whole demo is built around three equations:
 
 $$
-x_t=(1-t)z+tx
-$$
-
-$$
-u_t=x-z
+x_t = (1-t)z + tx,
+\qquad
+u_t = x - z,
 $$
 
 $$
@@ -521,19 +286,11 @@ $$
 \left\|
 v_\theta(x_t,t)-u_t
 \right\|^2
-\right]
-$$
-
-生成时：
-
-$$
-z \sim \mathcal{N}(0,I)
+\right],
 $$
 
 $$
-\frac{dx_t}{dt}=v_\theta(x_t,t)
+\frac{d x_t}{d t}=v_\theta(x_t,t).
 $$
 
-$$
-x_1 = \text{generated sample}
-$$
+Train the network to match the velocity on the path, then generate by following the learned velocity field from noise to image.
