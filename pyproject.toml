@@ -5,6 +5,7 @@ description = "Pixel-space class-conditional Flow Matching demo on CIFAR-10."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
+    "datasets>=2.20",
     "pillow>=10.0",
     "pyyaml>=6.0",
     "torch>=2.10,<2.12",

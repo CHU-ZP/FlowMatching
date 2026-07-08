@@ -1,5 +1,9 @@
 dataset: cifar10
+data_source: huggingface
 data_dir: ./datasets
+hf_cache_dir: ./datasets/huggingface
+hf_dataset_id: uoft-cs/cifar10
+download: true
 image_size: 32
 
 model: unet

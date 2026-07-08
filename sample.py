@@ -3,13 +3,15 @@ from __future__ import annotations
 import argparse
 import math
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 import torch
-from PIL import Image
-from torchvision.utils import make_grid, save_image
+from PIL import Image, ImageDraw, ImageFont
+from torchvision.utils import make_grid
 import yaml
 
+from data import CIFAR10_CLASSES
 from flow import sample_ode
 from models import TinyUNet
 
@@ -82,15 +84,122 @@ def make_class_labels(
     return labels, args.num_samples, nrow, "class_cycle"
 
 
-def tensor_to_pil_grid(x: torch.Tensor, nrow: int) -> Image.Image:
-    grid = make_grid(to_image_range(x), nrow=nrow)
-    array = (grid.permute(1, 2, 0).numpy() * 255.0).clip(0, 255).astype("uint8")
-    return Image.fromarray(array)
+def class_name(label: int, class_names: Sequence[str] = CIFAR10_CLASSES) -> str:
+    if 0 <= label < len(class_names):
+        return class_names[label]
+    return str(label)
 
 
-def save_trajectory_gif(frames: list[torch.Tensor], path: Path, nrow: int) -> None:
+def tensor_to_pil_image(x: torch.Tensor, scale: int = 1) -> Image.Image:
+    image = to_image_range(x.detach().cpu())
+    array = (image.permute(1, 2, 0).numpy() * 255.0).clip(0, 255).astype("uint8")
+    pil_image = Image.fromarray(array)
+    if scale > 1:
+        width, height = pil_image.size
+        pil_image = pil_image.resize((width * scale, height * scale), Image.Resampling.NEAREST)
+    return pil_image
+
+
+def tensor_to_pil_grid(
+    x: torch.Tensor,
+    nrow: int,
+    labels: torch.Tensor | None = None,
+    annotate: bool = True,
+    scale: int = 2,
+    label_mode: str = "tile",
+) -> Image.Image:
+    x = x.detach().cpu()
+    if labels is None or not annotate:
+        grid = make_grid(to_image_range(x), nrow=nrow)
+        array = (grid.permute(1, 2, 0).numpy() * 255.0).clip(0, 255).astype("uint8")
+        return Image.fromarray(array)
+
+    labels = labels.detach().cpu().long()
+    if labels.shape[0] != x.shape[0]:
+        raise ValueError(f"Expected {x.shape[0]} labels, got {labels.shape[0]}")
+
+    scale = max(1, scale)
+    padding = 2
+    font = ImageFont.load_default()
+    text_left, text_top, text_right, text_bottom = font.getbbox("automobile")
+    text_width = text_right - text_left
+    label_height = text_bottom + 6
+    row_label_width = text_width + 10 if label_mode == "row" else 0
+    tile_h = int(x.shape[-2]) * scale
+    tile_w = int(x.shape[-1]) * scale
+    rows = math.ceil(x.shape[0] / nrow)
+    if label_mode == "row":
+        grid_w = row_label_width + nrow * (tile_w + padding) + padding
+        grid_h = rows * (tile_h + padding) + padding
+    else:
+        grid_w = nrow * (tile_w + padding) + padding
+        grid_h = rows * (tile_h + label_height + padding) + padding
+    canvas = Image.new("RGB", (grid_w, grid_h), (0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    for idx, image in enumerate(x):
+        row = idx // nrow
+        col = idx % nrow
+        if label_mode == "row":
+            x0 = row_label_width + col * (tile_w + padding)
+            y0 = padding + row * (tile_h + padding)
+            if col == 0:
+                label = class_name(int(labels[idx]))
+                draw.rectangle((padding, y0, row_label_width - padding, y0 + tile_h - 1), fill=(20, 20, 20))
+                text_y = y0 + max(2, (tile_h - label_height) // 2)
+                draw.text((padding + 3, text_y), label, fill=(255, 255, 255), font=font)
+            canvas.paste(tensor_to_pil_image(image, scale=scale), (x0, y0))
+        else:
+            x0 = padding + col * (tile_w + padding)
+            y0 = padding + row * (tile_h + label_height + padding)
+            label = class_name(int(labels[idx]))
+            draw.rectangle((x0, y0, x0 + tile_w - 1, y0 + label_height - 1), fill=(20, 20, 20))
+            draw.text((x0 + 3, y0 + 2), label, fill=(255, 255, 255), font=font)
+            canvas.paste(tensor_to_pil_image(image, scale=scale), (x0, y0 + label_height))
+    return canvas
+
+
+def save_pil_grid(
+    x: torch.Tensor,
+    path: Path,
+    nrow: int,
+    labels: torch.Tensor | None = None,
+    annotate: bool = True,
+    scale: int = 2,
+    label_mode: str = "tile",
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    pil_frames = [tensor_to_pil_grid(frame, nrow=nrow) for frame in frames]
+    tensor_to_pil_grid(
+        x,
+        nrow=nrow,
+        labels=labels,
+        annotate=annotate,
+        scale=scale,
+        label_mode=label_mode,
+    ).save(path)
+
+
+def save_trajectory_gif(
+    frames: list[torch.Tensor],
+    path: Path,
+    nrow: int,
+    labels: torch.Tensor | None = None,
+    annotate: bool = True,
+    scale: int = 2,
+    label_mode: str = "tile",
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pil_frames = [
+        tensor_to_pil_grid(
+            frame,
+            nrow=nrow,
+            labels=labels,
+            annotate=annotate,
+            scale=scale,
+            label_mode=label_mode,
+        )
+        for frame in frames
+    ]
     pil_frames[0].save(
         path,
         save_all=True,
@@ -115,6 +224,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--class-label", type=int, default=None)
     parser.add_argument("--class-grid", action="store_true")
     parser.add_argument("--samples-per-class", type=int, default=8)
+    parser.add_argument("--no-class-names", action="store_true")
+    parser.add_argument("--label-scale", type=int, default=2)
     parser.add_argument("--save-trajectory", action="store_true")
     parser.add_argument("--trajectory-every", type=int, default=1)
     return parser.parse_args()
@@ -157,12 +268,29 @@ def main() -> None:
     )
 
     output_path = args.out or (out_dir / "samples" / f"{output_tag}_{method}_{steps:03d}.png")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    save_image(to_image_range(samples), output_path, nrow=nrow)
+    annotate = labels is not None and not args.no_class_names
+    label_mode = "row" if args.class_grid else "tile"
+    save_pil_grid(
+        samples,
+        output_path,
+        nrow=nrow,
+        labels=labels,
+        annotate=annotate,
+        scale=args.label_scale,
+        label_mode=label_mode,
+    )
 
     if args.save_trajectory and frames is not None:
         gif_path = output_path.with_suffix(".gif")
-        save_trajectory_gif(frames, gif_path, nrow=nrow)
+        save_trajectory_gif(
+            frames,
+            gif_path,
+            nrow=nrow,
+            labels=labels,
+            annotate=annotate,
+            scale=args.label_scale,
+            label_mode=label_mode,
+        )
 
     print(f"Saved samples to {output_path}")
 

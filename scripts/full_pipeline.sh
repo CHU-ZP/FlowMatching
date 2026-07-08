@@ -7,7 +7,10 @@ cd "$PROJECT_DIR"
 MODE="conditional"
 BASE_CONFIG="$PROJECT_DIR/configs/cifar10_unet_fm.yaml"
 CONFIG_DIR="$PROJECT_DIR/configs/generated"
+DATA_SOURCE="huggingface"
 DATA_DIR="$PROJECT_DIR/datasets"
+HF_CACHE_DIR=""
+HF_ENDPOINT=""
 RUN_ROOT="$PROJECT_DIR/runs/full_pipeline"
 EPOCHS="100"
 BATCH_SIZE="128"
@@ -38,7 +41,10 @@ Main options:
   --mode conditional|unconditional|both
   --epochs N
   --batch-size N
+  --data-source huggingface|torchvision
   --data-dir PATH
+  --hf-cache-dir PATH
+  --hf-endpoint URL
   --run-root PATH
   --device cuda|cpu|cuda:0
 
@@ -63,7 +69,7 @@ Control options:
 Examples:
   scripts/full_pipeline.sh --mode conditional --epochs 100
   scripts/full_pipeline.sh --mode unconditional --epochs 100
-  scripts/full_pipeline.sh --mode both --epochs 100 --data-dir /data/cifar10/datasets
+  scripts/full_pipeline.sh --mode both --epochs 100 --data-source huggingface --data-dir /data/cifar10/datasets
 EOF
 }
 
@@ -80,7 +86,10 @@ while [[ $# -gt 0 ]]; do
     --epochs) EPOCHS="$2"; shift 2 ;;
     --batch-size) BATCH_SIZE="$2"; shift 2 ;;
     --num-workers) NUM_WORKERS="$2"; shift 2 ;;
+    --data-source) DATA_SOURCE="$2"; shift 2 ;;
     --data-dir) DATA_DIR="$(abs_path "$2")"; shift 2 ;;
+    --hf-cache-dir) HF_CACHE_DIR="$(abs_path "$2")"; shift 2 ;;
+    --hf-endpoint) HF_ENDPOINT="$2"; shift 2 ;;
     --run-root) RUN_ROOT="$(abs_path "$2")"; shift 2 ;;
     --device) DEVICE="$2"; shift 2 ;;
     --steps) STEPS="$2"; shift 2 ;;
@@ -111,6 +120,23 @@ case "$METHOD" in
   *) echo "--method must be euler or heun" >&2; exit 2 ;;
 esac
 
+case "$DATA_SOURCE" in
+  huggingface|torchvision) ;;
+  *) echo "--data-source must be huggingface or torchvision" >&2; exit 2 ;;
+esac
+
+if [[ "$DATA_SOURCE" == "huggingface" && -z "$HF_CACHE_DIR" ]]; then
+  HF_CACHE_DIR="$DATA_DIR/huggingface"
+fi
+
+if [[ -n "$HF_ENDPOINT" ]]; then
+  export HF_ENDPOINT
+fi
+
+if [[ "$NO_DOWNLOAD" == "1" ]]; then
+  export HF_DATASETS_OFFLINE=1
+fi
+
 if [[ "$SKIP_SYNC" == "0" ]]; then
   uv sync
 fi
@@ -138,7 +164,18 @@ fi
 mkdir -p "$CONFIG_DIR" "$RUN_ROOT"
 
 if [[ "$SKIP_DATA" == "0" ]]; then
-  data_args=(prepare_data.py --config "$BASE_CONFIG" --data-dir "$DATA_DIR")
+  data_args=(
+    prepare_data.py
+    --config "$BASE_CONFIG"
+    --data-source "$DATA_SOURCE"
+    --data-dir "$DATA_DIR"
+  )
+  if [[ -n "$HF_CACHE_DIR" ]]; then
+    data_args+=(--hf-cache-dir "$HF_CACHE_DIR")
+  fi
+  if [[ -n "$HF_ENDPOINT" ]]; then
+    data_args+=(--hf-endpoint "$HF_ENDPOINT")
+  fi
   if [[ "$NO_DOWNLOAD" == "1" ]]; then
     data_args+=(--no-download)
   fi
@@ -155,7 +192,10 @@ make_config() {
     "$BASE_CONFIG" \
     "$config_path" \
     "$class_conditional" \
+    "$DATA_SOURCE" \
     "$DATA_DIR" \
+    "$HF_CACHE_DIR" \
+    "$NO_DOWNLOAD" \
     "$out_dir" \
     "$EPOCHS" \
     "$BATCH_SIZE" \
@@ -170,7 +210,10 @@ import yaml
     base_config,
     output_config,
     class_conditional,
+    data_source,
     data_dir,
+    hf_cache_dir,
+    no_download,
     out_dir,
     epochs,
     batch_size,
@@ -183,6 +226,12 @@ with open(base_config, "r", encoding="utf-8") as handle:
     cfg = yaml.safe_load(handle)
 
 cfg["data_dir"] = data_dir
+cfg["data_source"] = data_source
+cfg["download"] = no_download != "1"
+if hf_cache_dir:
+    cfg["hf_cache_dir"] = hf_cache_dir
+else:
+    cfg.pop("hf_cache_dir", None)
 cfg["out_dir"] = out_dir
 cfg["class_conditional"] = class_conditional == "true"
 cfg["num_classes"] = 10

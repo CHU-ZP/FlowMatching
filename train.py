@@ -77,6 +77,12 @@ def project_path(config_path: Path, value: str) -> Path:
     return config_path.resolve().parent.parent / path
 
 
+def optional_project_path(config_path: Path, value: str | None) -> Path | None:
+    if value is None:
+        return None
+    return project_path(config_path, value)
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
@@ -178,6 +184,9 @@ def main() -> None:
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     out_dir = project_path(config_path, str(cfg.get("out_dir", "./runs/cifar10_fm")))
     data_dir = project_path(config_path, str(cfg.get("data_dir", "./datasets")))
+    hf_cache_dir = optional_project_path(config_path, cfg.get("hf_cache_dir"))
+    if str(cfg.get("data_source", "huggingface")) == "huggingface" and hf_cache_dir is None:
+        hf_cache_dir = data_dir / "huggingface"
     checkpoint_dir = out_dir / "checkpoints"
     sample_dir = out_dir / "samples"
 
@@ -185,6 +194,11 @@ def main() -> None:
         data_dir=str(data_dir),
         batch_size=int(cfg.get("batch_size", 128)),
         num_workers=int(cfg.get("num_workers", 4)),
+        download=bool(cfg.get("download", True)),
+        data_source=str(cfg.get("data_source", "huggingface")),
+        hf_cache_dir=str(hf_cache_dir) if hf_cache_dir is not None else None,
+        hf_dataset_id=str(cfg.get("hf_dataset_id", "uoft-cs/cifar10")),
+        hf_config_name=cfg.get("hf_config_name"),
     )
     model = build_model(cfg).to(device)
     optimizer = torch.optim.AdamW(
