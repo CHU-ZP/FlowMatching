@@ -1,4 +1,8 @@
-# CIFAR-10 Flow Matching Demo
+# Flow Matching on CIFAR-10
+
+<p align="right">
+English | <a href="README.zh-CN.md">中文</a>
+</p>
 
 This repository is a compact demonstration of **pixel-space Flow Matching / Rectified Flow** on CIFAR-10.
 
