@@ -165,32 +165,6 @@ t: 0 \rightarrow 1.
 
 ODE sampler 在 [`flow/sampler.py`](flow/sampler.py)，采样入口在 [`sample.py`](sample.py)。
 
-## 和扩散模型的关系
-
-扩散模型里的 velocity prediction 通常来自某个加噪公式，例如：
-
-```math
-x_t = \alpha_t x_0 + \sigma_t \epsilon,
-```
-
-然后把预测目标改写成 noise、score、data 或 velocity 的某种等价参数化。
-
-Flow Matching 里的 velocity 更直接。对于这里的直线路径：
-
-```math
-x_t = (1 - t)z + tx,
-\qquad
-v = x - z.
-```
-
-这个 $v$ 就是路径本身的时间导数。
-
-| 方法 | 学习对象 | 生成方式 |
-| --- | --- | --- |
-| VAE | latent distribution 和 decoder | sample latent 后 decode |
-| Diffusion | denoising、score 或 noise field | 反向去噪或 reverse SDE/ODE |
-| Flow Matching | vector field / velocity field | 从噪声出发解 ODE 到数据 |
-
 ## 这个项目实现了什么
 
 数据是归一化后的 CIFAR-10 图像：
@@ -229,6 +203,32 @@ v_\theta(x_t,t,y) - (x - z)
 ```
 
 无条件训练时，类别标签这一项会被省略。
+
+## 和扩散模型的关系
+
+扩散模型里的 velocity prediction 通常来自某个加噪公式，例如：
+
+```math
+x_t = \alpha_t x_0 + \sigma_t \epsilon,
+```
+
+然后把预测目标改写成 noise、score、data 或 velocity 的某种等价参数化。
+
+Flow Matching 里的 velocity 更直接。对于这里的直线路径：
+
+```math
+x_t = (1 - t)z + tx,
+\qquad
+v = x - z.
+```
+
+这个 $v$ 就是路径本身的时间导数。
+
+| 方法 | 学习对象 | 生成方式 |
+| --- | --- | --- |
+| VAE | latent distribution 和 decoder | sample latent 后 decode |
+| Diffusion | denoising、score 或 noise field | 反向去噪或 reverse SDE/ODE |
+| Flow Matching | vector field / velocity field | 从噪声出发解 ODE 到数据 |
 
 ## 结果展示
 
